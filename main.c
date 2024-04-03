@@ -4,7 +4,9 @@
 #include <unistd.h>
 
 #define MAX_BUF_SIZE 1024
-//iwlist wlp2s0 txpower
+//sudo iwconfig wlp2s0 txpower 21
+//sudo iwlist wlp2s0 txpower
+//sudo ethtool -S wlp2s0
 #define clr() printf("\e[1;1H\e[2J")
 
 #define MAX_INTERFACES 1000
@@ -54,7 +56,9 @@ void getInterfaces() {
 
 
     interface = interfaces[choice-1];
-    clr();
+    char* par1 = "MOC SYGNAŁU";
+    char* par2 = "MOC PRĄDU";
+    printf("\n\n-----------------------------\n%s | %s\n", par1, par2);
 }
 
 
@@ -89,7 +93,18 @@ int main() {
                 printf("Moc sygnału dla interfejsu %s: %d dBm\n", interface, rssi);
                 pclose(fp);
                 break;
-                //return 0;
+            }
+            if (strstr(command, "Tx-Power") != NULL) {
+                // Podziel linię na tokeny
+                token = strtok(command, "=");
+                token = strtok(NULL, "=");
+
+                // Odczytaj wartość sygnału RSSI
+                sscanf(token, "%d", &rssi);
+
+                printf("Moc prądu dla interfejsu %s: %d dBm\n", interface, rssi);
+                pclose(fp);
+                break;
             }
         }
 
