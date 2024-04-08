@@ -11,6 +11,8 @@
 
 #define MAX_INTERFACES 1000
 char* interface;
+double max_interface_pow = 144.0;
+double max_sig_pow = 70.0;
 
 void getInterfaces() {
     FILE *fp;
@@ -56,12 +58,24 @@ void getInterfaces() {
 
 
     interface = interfaces[choice-1];
-    char* par1 = "MOC SYGNAŁU";
-    char* par2 = "MOC PRĄDU";
-    printf("\n\n-----------------------------\n%s | %s\n", par1, par2);
+    printf("-----------------------------\n\n%-11s | %-11s\n", "MOC SYGNAŁU", "MOC PRĄDU");
 }
 
+void set_interface_pow(char* interface, int power_level) {
+    char command[MAX_BUF_SIZE];
 
+    // Tworzenie polecenia do ustawienia mocy transmisji
+    snprintf(command, sizeof(command), "iwconfig %s txpower %d", interface, power_level);
+
+    // Wykonywanie polecenia
+    int status = system(command);
+    if (status != 0) {
+        perror("Błąd podczas ustawiania mocy transmisji");
+        exit(EXIT_FAILURE);
+    }
+
+    //printf("Moc transmisji dla interfejsu %s ustawiona na %d dBm\n", interface, power_level);
+}
 
 int main() {
     clr();
@@ -70,7 +84,9 @@ int main() {
     char command[MAX_BUF_SIZE];
     getInterfaces();//"wlp2s0";
     char *token;
-    int rssi;
+    char *token1;
+    int sig_pow;
+    int interface_pow;
     while(1){
         snprintf(command, sizeof(command), "iwconfig %s", interface);
 
@@ -79,36 +95,36 @@ int main() {
             perror("Błąd otwierania strumienia do polecenia iwconfig");
             exit(EXIT_FAILURE);
         }
-
-        while (fgets(command, sizeof(command), fp) != NULL) {
-            // Szukaj linii zawierającej informacje o sygnałach
+        while(fgets(command, sizeof(command), fp) != NULL){
             if (strstr(command, "Signal level") != NULL) {
-                // Podziel linię na tokeny
                 token = strtok(command, "=");
                 token = strtok(NULL, "=");
-
-                // Odczytaj wartość sygnału RSSI
-                sscanf(token, "%d", &rssi);
-
-                printf("Moc sygnału dla interfejsu %s: %d dBm\n", interface, rssi);
-                pclose(fp);
-                break;
+                sscanf(token, "%d", &sig_pow);
             }
+
             if (strstr(command, "Tx-Power") != NULL) {
-                // Podziel linię na tokeny
-                token = strtok(command, "=");
-                token = strtok(NULL, "=");
-
-                // Odczytaj wartość sygnału RSSI
-                sscanf(token, "%d", &rssi);
-
-                printf("Moc prądu dla interfejsu %s: %d dBm\n", interface, rssi);
-                pclose(fp);
-                break;
+                token1 = strtok(command, "=");
+                token1 = strtok(NULL, "=");
+                sscanf(token1, "%d", &interface_pow);
             }
+        }   
+        pclose(fp);
+
+        double sig_pow_procent = (double)sig_pow/max_sig_pow;
+        double to_set_procent = 1.0;
+        if(sig_pow_procent<=0.4){
+            to_set_procent = 1.0;
+        }else if (sig_pow_procent >= 1.0){
+            to_set_procent = 0.4;
+        }else{
+            to_set_procent = 1.4 - sig_pow_procent;
         }
 
-        sleep(2);
+
+        printf("\n\nprocent: %f zadana %f\n\n",to_set_procent, to_set_procent*max_interface_pow);
+        printf("%-11i | %-11i\n", sig_pow, interface_pow);
+
+        sleep(1);
     }
     return 0;
 }
