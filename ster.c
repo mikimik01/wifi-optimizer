@@ -2,21 +2,46 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <linux/wireless.h>
 
-#define MAX_BUF_SIZE 1024
+int main() {
+    const char *interface = "wlp2s0";
 
-void set_interface_pow(char* interface, int power_level) {
-    char command[MAX_BUF_SIZE];
+    int sockfd;
+    struct iwreq wrq;
 
-    // Tworzenie polecenia do ustawienia mocy transmisji
-    snprintf(command, sizeof(command), "iwconfig %s txpower %d", interface, power_level);
-
-    // Wykonywanie polecenia
-    int status = system(command);
-    if (status != 0) {
-        perror("Błąd podczas ustawiania mocy transmisji");
-        exit(EXIT_FAILURE);
+    // Otwórz gniazdo do interfejsu bezprzewodowego
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+        perror("socket");
+        return 1;
     }
 
-    //printf("Moc transmisji dla interfejsu %s ustawiona na %d dBm\n", interface, power_level);
+    // Ustaw nazwę interfejsu
+    strncpy(wrq.ifr_name, interface, IFNAMSIZ);
+
+    // Pobierz aktualne ustawienia
+    if (ioctl(sockfd, SIOCGIWTXPOW, &wrq) == -1) {
+        perror("ioctl(SIOCGIWTXPOW)");
+        close(sockfd);
+        return 1;
+    }
+
+    // Wyświetl aktualny poziom mocy
+
+    //wrq.u.txpower.value = 40;
+    printf("Aktualny poziom mocy dla interfejsu %s: %d dBm\n", interface, wrq.u.txpower.value);
+
+    // Ustaw te same parametry mocy
+    if (ioctl(sockfd, SIOCSIWTXPOW, &wrq) == -1) {
+        perror("ioctl(SIOCSIWTXPOW)");
+        close(sockfd);
+        return 1;
+    }
+
+    printf("Parametry mocy dla interfejsu %s zostały ustawione na takie same wartości.\n", interface);
+
+    close(sockfd);
+    return 0;
 }

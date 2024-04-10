@@ -2,17 +2,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <linux/wireless.h>
 
 #define MAX_BUF_SIZE 1024
+//PRZYDATNE KOMENDY
 //sudo iwconfig wlp2s0 txpower 21
 //sudo iwlist wlp2s0 txpower
 //sudo ethtool -S wlp2s0
+
+//iw reg get (od 6 do 22)
+//strace ifconfig wlan0;
 #define clr() printf("\e[1;1H\e[2J")
 
 #define MAX_INTERFACES 1000
 char* interface;
-double max_interface_pow = 144.0;
+double max_interface_pow = 22.0;
+double min_interface_pow = 6.0;
 double max_sig_pow = 70.0;
+
 
 void getInterfaces() {
     FILE *fp;
@@ -20,20 +29,20 @@ void getInterfaces() {
     char interfaces[MAX_INTERFACES][256];
     int interface_count = 0;
 
-    // Otwórz plik /proc/net/dev
+    // plik /proc/net/dev
     fp = fopen("/proc/net/dev", "r");
     if (fp == NULL) {
         perror("Błąd otwierania pliku /proc/net/dev");
         exit(EXIT_FAILURE);
     }
 
-    // Pomiń pierwsze dwie linie pliku (nagłówki)
+    // pomijam nagłówki
     fgets(line, sizeof(line), fp);
     fgets(line, sizeof(line), fp);
 
-    // Wczytaj nazwy bezprzewodowych interfejsów z pliku
+    // wczytuje nazwy inter. bezp.
     while (fgets(line, sizeof(line), fp) != NULL && interface_count < MAX_INTERFACES) {
-        // Sprawdź, czy linia zawiera interfejs bezprzewodowy
+        // czy w lini jest nazwa
         if (strstr(line, "wlan") != NULL || strstr(line, "wlp") != NULL) {
             char *interface_name = strtok(line, ":");
             if (interface_name != NULL) {
@@ -43,10 +52,8 @@ void getInterfaces() {
         }
     }
 
-    // Zamknij plik
     fclose(fp);
 
-    // Wyświetl nazwy bezprzewodowych interfejsów
     printf("Znalazłem dla Ciebie bezprzewodowe interfejsy sieciowe (%i):\n\n-----------------------------\n", interface_count);
     for (int i = 0; i < interface_count; i++) {
         printf("%i. %s\n", i+1, interfaces[i]);
@@ -58,23 +65,42 @@ void getInterfaces() {
 
 
     interface = interfaces[choice-1];
-    printf("-----------------------------\n\n%-11s | %-11s\n", "MOC SYGNAŁU", "MOC PRĄDU");
+    printf("-----------------------------\n\n%-15s | %-15s\n", "MOC SYGNAŁU (dBm)", "MOC PRĄDU (dBm)");
 }
 
-void set_interface_pow(char* interface, int power_level) {
-    char command[MAX_BUF_SIZE];
+int set_interface_power(char* interface, int power) {
 
-    // Tworzenie polecenia do ustawienia mocy transmisji
-    snprintf(command, sizeof(command), "iwconfig %s txpower %d", interface, power_level);
+    int sockfd;
+    struct iwreq wrq;
 
-    // Wykonywanie polecenia
-    int status = system(command);
-    if (status != 0) {
-        perror("Błąd podczas ustawiania mocy transmisji");
-        exit(EXIT_FAILURE);
+    // tworze gniazdo
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+        perror("socket");
+        return 1;
     }
 
-    //printf("Moc transmisji dla interfejsu %s ustawiona na %d dBm\n", interface, power_level);
+    // ustawiam nazwe inter.
+    strncpy(wrq.ifr_name, interface, IFNAMSIZ);
+
+    // pobieram aktualne ustawienia
+    if (ioctl(sockfd, SIOCGIWTXPOW, &wrq) == -1) {
+        perror("ioctl(SIOCGIWTXPOW)");
+        close(sockfd);
+        return 1;
+    }
+
+    // zmieniam moc
+    wrq.u.txpower.value = power;
+
+    // aktualizuje parametry
+    if (ioctl(sockfd, SIOCSIWTXPOW, &wrq) == -1) {
+        perror("ioctl(SIOCSIWTXPOW)");
+        close(sockfd);
+        return 1;
+    }
+
+    close(sockfd);
+    return wrq.u.txpower.value;
 }
 
 int main() {
@@ -82,11 +108,10 @@ int main() {
     
     FILE *fp;
     char command[MAX_BUF_SIZE];
-    getInterfaces();//"wlp2s0";
+    getInterfaces();
     char *token;
-    char *token1;
     int sig_pow;
-    int interface_pow;
+
     while(1){
         snprintf(command, sizeof(command), "iwconfig %s", interface);
 
@@ -101,28 +126,17 @@ int main() {
                 token = strtok(NULL, "=");
                 sscanf(token, "%d", &sig_pow);
             }
-
-            if (strstr(command, "Tx-Power") != NULL) {
-                token1 = strtok(command, "=");
-                token1 = strtok(NULL, "=");
-                sscanf(token1, "%d", &interface_pow);
-            }
-        }   
+        }
         pclose(fp);
 
         double sig_pow_procent = (double)sig_pow/max_sig_pow;
-        double to_set_procent = 1.0;
-        if(sig_pow_procent<=0.4){
-            to_set_procent = 1.0;
-        }else if (sig_pow_procent >= 1.0){
-            to_set_procent = 0.4;
-        }else{
-            to_set_procent = 1.4 - sig_pow_procent;
-        }
 
+        int pow_to_set = (int)(2.0*(22.0*(1.0-(sig_pow_procent))));
+        if(pow_to_set>22) pow_to_set = 22;
+        else if(pow_to_set<6) pow_to_set = 6;
 
-        printf("\n\nprocent: %f zadana %f\n\n",to_set_procent, to_set_procent*max_interface_pow);
-        printf("%-11i | %-11i\n", sig_pow, interface_pow);
+        int is_set = set_interface_power(interface, pow_to_set);
+        printf("%-17i | %-17i\n", sig_pow, is_set);
 
         sleep(1);
     }
